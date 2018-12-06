@@ -13,8 +13,10 @@
 #
 
 import click
+import re
 import sys
 from skbio import Sequence
+from skbio.tree import TreeNode
 
 
 # T-REX version 3.6
@@ -37,7 +39,7 @@ hgt_parse_strs = {
     'riata-hgt': ('There are ',
                   'There are ',
                   ' component(s)')}
-
+RANGER_DTL_IDENTIFIER = "Transfers = 100"
 
 def parse_hgts(input_f, method):
     """ Extract number of HGTs found.
@@ -255,12 +257,39 @@ def parse_genemark(input_f, genbank_fp):
     return '\n'.join(sorted(atypical_genes))
 
 
+def parse_ranger_dtl(input_f, tree_fp):
+    """ Extract HGT by Ranger DTL
+
+    Parameters
+    ----------
+    input_f: string
+        file descriptor for GeneMark output gene list (*.lst)
+    tree_fp: string
+        path to the gene tree
+    Returns
+    -------
+    output: list of TreeNode 
+    """
+    results = []
+    tree = TreeNode.read(tree_fp, format='newick')
+    for line in input_f:
+        if RANGER_DTL_IDENTIFIER in line:
+            gene_names = line.strip().split(RANGER_DTL_IDENTIFIER)[0].split(":")[0]
+            gene_1, gene_2 = re.findall(r'\[(.*?)\]', gene_names)[0].split(',')
+            gene_2 = gene_2.strip()
+            gene_1 = gene_1.replace('_', '/') 
+            gene_2 = gene_2.replace('_', '/') 
+            results.append(tree.lca([tree.find(gene_1), tree.find(gene_2)]))
+    return results       
+
+
 def parse_output(hgt_results_fp,
                  method,
                  genbank_fp=None,
                  low_lpi=0.0,
                  high_lpi=0.6,
-                 output_fp=None):
+                 output_fp=None,
+                 tree_fp=None):
     """Call parse_hgts() based on HGT detection method used.
     Parameters
     ----------
@@ -282,8 +311,9 @@ def parse_output(hgt_results_fp,
         number of HGTs detected
     """
     with open(hgt_results_fp, 'r') as input_f:
-        if (method == 'ranger-dtl' or
-                method == 'trex' or
+        if (method == 'ranger-dtl'):
+            output = str(parse_ranger_dtl(input_f, tree_fp))
+        elif (method == 'trex' or
                 method == 'jane4' or
                 method == 'riata-hgt'):
             output = parse_hgts(input_f=input_f,
@@ -337,13 +367,18 @@ def parse_output(hgt_results_fp,
               type=click.Path(resolve_path=True, readable=True, exists=False,
                               file_okay=True),
               help='Output all best hit IDs from DarkHorse summary')
+@click.option('--tree-fp', required=False,
+              type=click.Path(resolve_path=True, readable=True, exists=True,
+                              file_okay=True),
+              help='The genetree for ranger dtl')
 def main(hgt_results_fp,
          genbank_fp,
          method,
          ncbi_nr,
          darkhorse_low_lpi,
          darkhorse_high_lpi,
-         darkhorse_output_fp=None):
+         darkhorse_output_fp=None,
+         tree_fp=None):
     """ Parsing functions for various HGT detection tool outputs.
     """
     output = parse_output(hgt_results_fp=hgt_results_fp,
@@ -351,7 +386,8 @@ def main(hgt_results_fp,
                           genbank_fp=genbank_fp,
                           low_lpi=darkhorse_low_lpi,
                           high_lpi=darkhorse_high_lpi,
-                          output_fp=darkhorse_output_fp)
+                          output_fp=darkhorse_output_fp,
+                          tree_fp=tree_fp)
     sys.stdout.write(output)
 
 
